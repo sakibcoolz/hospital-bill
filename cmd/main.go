@@ -4,14 +4,39 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"hospital-bill/constant"
+	"hospital-bill/db"
 	"hospital-bill/model"
-	"hospital-bill/utils"
 	"os"
+
+	"github.com/kataras/tablewriter"
+	"github.com/lensesio/tableprinter"
 )
 
+func MakeSpace(str string) {
+	for i := 0; i < 10; i++ {
+		fmt.Printf("\n")
+	}
+	fmt.Println("**************************", str, "************************************")
+
+}
+
 func main() {
+	db := db.DBConnect()
+
+	printer := tableprinter.New(os.Stdout)
+
+	printer.BorderTop, printer.BorderBottom, printer.BorderLeft, printer.BorderRight = true, true, true, true
+	printer.CenterSeparator = "│"
+	printer.ColumnSeparator = "│"
+	printer.RowSeparator = "─"
+	printer.HeaderBgColor = tablewriter.BgBlackColor
+	printer.HeaderFgColor = tablewriter.FgGreenColor
+
+	db.AutoMigrate(&model.BillMaster{})
+
 	// Define the flag for the JSON file path
-	jsonFilePath := flag.String("file", "", "Path to the JSON file")
+	jsonFilePath := flag.String("file", "data/bill.json", "Path to the JSON file")
 	flag.Parse()
 
 	// Check if the flag is provided
@@ -35,35 +60,64 @@ func main() {
 		return
 	}
 
-	// Create a nested map[OrderDate]map[Service][]BillMaster
-	orderDateMap := make(map[string]map[string][]model.BillMaster)
+	db.Create(bills)
 
-	// Populate the nested map
-	for _, bill := range bills {
-		formattedDate := utils.DateFormatter(bill.OrderDate)
-		// Check if OrderDate exists in the outer map
-		if _, exists := orderDateMap[formattedDate]; !exists {
-			orderDateMap[formattedDate] = make(map[string][]model.BillMaster)
+	err = func() error {
+		var results []model.PatientShareSummary
+		db.Begin()
+		err = db.Model(&model.BillMaster{}). // Point to the model
+							Select("patient_name, SUM(patient_share_amount::float) as total").
+							Group("patient_name").
+							Scan(&results).Error
+		if err != nil {
+			return err
 		}
-		// Append the BillMaster object to the slice under the inner map's Service key
-		orderDateMap[formattedDate][bill.Service] = append(orderDateMap[formattedDate][bill.Service], bill)
-	}
-
-	// Print the nested map
-	fmt.Println("Nested Map (OrderDate -> Service -> []BillMaster):")
-	for orderDate, serviceMap := range orderDateMap {
-		fmt.Printf("OrderDate: %s\n", orderDate)
-		for service, bills := range serviceMap {
-			fmt.Printf("  Service: %s\n", service)
-			for i, bill := range bills {
-				fmt.Printf("    Bill %d:\n", i+1)
-				fmt.Printf("      Patient Name: %s\n", bill.PatientName)
-				fmt.Printf("      Doctor Name: %s\n", bill.DoctorName)
-				fmt.Printf("      Service Amount: %s\n", bill.ServiceAmount)
-				fmt.Printf("      Payor Name: %s\n", bill.PayorName)
-			}
-		}
+		fmt.Println("All Amount")
+		MakeSpace("PatientShareSummary")
+		printer.Print(results)
 		fmt.Println()
-	}
+
+		return err
+	}()
+
+	func() {
+		var results []model.PerticularWise
+		db.Begin()
+		db.Raw(constant.ServiceDateWise).Find(&results)
+		MakeSpace("PatientShareSummary")
+		fmt.Println("Date wise summary")
+		printer.Print(results)
+		fmt.Println("Date wise summary End")
+	}()
+
+	func() {
+		var results []model.DoctorPerticularWise
+		db.Begin()
+		db.Raw(constant.DoctorServiceSpecific).Find(&results)
+		MakeSpace("DoctorPerticularWise")
+		fmt.Println("DoctorPerticularWise wise summary")
+		printer.Print(results)
+		fmt.Println("DoctorPerticularWise wise summary End")
+	}()
+
+	func() {
+		var results []model.Summary
+		db.Begin()
+		db.Raw(constant.Summary).Find(&results)
+		MakeSpace("Summary")
+		fmt.Println("Summary wise summary")
+		printer.Print(results)
+		fmt.Println("Summary wise summary End")
+	}()
+
+	func() {
+		var results []model.ItemWiseSpecification
+		db.Begin()
+		db.Raw(constant.ItemWiseSpecification).Find(&results)
+		MakeSpace("ItemWiseSpecification")
+		fmt.Println("ItemWiseSpecification wise summary")
+		printer.Print(results)
+		fmt.Println("ItemWiseSpecification wise summary End")
+	}()
 
 }
